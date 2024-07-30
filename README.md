@@ -1,6 +1,6 @@
 # SARA-risk-reportcard
 
-Open code to expose the spatial extent of a Strategic Asset or Resource (SARA) *(also known as a Highly Valuable Resource or Asset (HVRA))* extent to risk of loss via fire.
+Open code to expose the spatial extent of a Strategic Asset or Resource (SARA) *(also known as a Highly Valuable Resource or Asset (HVRA))* to risk of loss via fire.
 
 
 
