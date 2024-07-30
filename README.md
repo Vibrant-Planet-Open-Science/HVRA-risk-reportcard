@@ -11,7 +11,7 @@ Open code to expose the spatial extent of a Asset or Resource *(also known as a 
 This code base executes the following steps:
 - Import existing HVRA response functions via a `.csv` file
 - Expose those response functions to predicted flame length rasters by fire intensity class
-- Calculate the cumulative loss or gain of an HVRA based on a 10-year cumultive burn probability
+- Calculate the cumulative loss or gain of an HVRA based on a 10-year cumulative burn probability
 
 
 
