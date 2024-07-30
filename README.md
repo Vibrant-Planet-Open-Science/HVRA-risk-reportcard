@@ -1,4 +1,4 @@
-# SARA-risk-reportcard
+# HVRA-risk-reportcard
 Authors:
   - Dr. Sophie Gilbert
   - Dr. Michael Koontz
@@ -6,7 +6,7 @@ Authors:
   - Dr. Tyler Hoecker
   - Dr. Joe Shannon
 
-Open code to expose the spatial extent of a Strategic Asset or Resource (SARA) *(also known as a Highly Valuable Resource or Asset (HVRA))* to risk of loss via fire.
+Open code to expose the spatial extent of a Asset or Resource *(also known as a Highly Valuable Resource or Asset (HVRA))* to risk of loss via fire.
 
 This code base executes the following steps:
 - Import existing HVRA response functions via a `.csv` file
