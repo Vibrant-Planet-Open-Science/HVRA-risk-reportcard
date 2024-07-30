@@ -1,0 +1,572 @@
+---
+title: "Fire hazard for `r params$sara_name` in the `r stringr::str_to_title(params$landscape_name)` Landscape"
+author: "Sophie Gilbert and Mike Koontz, Vibrant Planet"
+date: "`r Sys.Date()`"
+output: pdf_document
+indent: false
+# params:
+#   landscape_name: ""
+#   sara_vector_s3_fname: ""
+#   sara_raster_s3_fname: ""
+#   sara_vector_zipped_s3_fname: ""
+#   sara_name: ""
+#   rf: ""
+#   session_ingest: ""
+#   session_automation: ""
+---
+
+```{r load libraries, echo=FALSE, message=FALSE, results=FALSE}
+library(aws.s3)
+library(dplyr)
+library(kableExtra)
+library(colorRamps)
+library(viridis)
+
+
+```
+
+
+```{r get flp and bp data and crop, echo=FALSE, message=FALSE, results=FALSE}
+# If it hasn't been done already (we check by looking in the expected spot on our
+# S3 bucket), then fetch the modeling extent for the landscape, the west-wide
+# burn probability raster (`outyear_burn_probability.tif`) from the latest
+# WildEST run, and the 6-band flame length probability raster also from the latest
+# WildEST run.
+# 
+# Note that this is all mostly plumbing and the whole chunk can likely be ignored.
+
+
+dir.create(path = file.path(tempdir(), landscape_name), showWarnings = FALSE)
+
+flp_s3_fname = glue::glue("s3://vp-sci-grp/prototypes/reportcard/interim/landscapes/{landscape_name}/flp.tif")
+flp_local_fname = file.path(tempdir(), landscape_name, basename(flp_s3_fname))
+
+outyear_bp_s3_fname = glue::glue("s3://vp-sci-grp/prototypes/reportcard/interim/landscapes/{landscape_name}/outyear_burn_probability.tif")
+outyear_bp_local_fname = file.path(tempdir(), landscape_name, basename(outyear_bp_s3_fname))
+
+if(params$session_automation == "") {
+  session_automation = DBI::dbConnect(
+    drv = RPostgres::Postgres(),
+    dbname = "automation",
+    host = "db.vibrantpla.net",
+    port = 5432,
+    user = Sys.getenv("DB_USERNAME"),
+    password = Sys.getenv("DB_PASSWORD")
+  )
+}
+
+aoi = rpostgis::pgGetGeom(
+  conn = session_automation,
+  name = c("lookup", "landscape_details"),
+  geom = "geometry",
+  clauses  = glue::glue("WHERE name = '{landscape_name}' AND extent = 'modeling'"),
+  returnclass = "sf"
+)
+
+if(!aws.s3::object_exists(object = flp_s3_fname) | !aws.s3::object_exists(object = outyear_bp_s3_fname)) {
+  
+  fire_model_table_path = DBI::Id(schema = "lookup", table = "fire_model")
+  
+  fire_model_table = dplyr::tbl(
+    src = session_automation, 
+    from = fire_model_table_path
+  )
+  
+  latest_wildest_run_s3 = fire_model_table |>
+    dplyr::filter(wildest_run_date == max(wildest_run_date)) |>
+    dplyr::filter(wildest_run == "NAC") |>
+    dplyr::collect() |> 
+    dplyr::mutate(
+      location_list = purrr::map(
+        .x = location, 
+        .f = jsonlite::fromJSON
+      )
+    ) |> 
+    tidyr::unnest_wider(col = "location_list") |> 
+    dplyr::mutate(
+      full_s3_path = glue::glue(
+        "s3://{s3_bucket}/{s3_dir_path}"
+      )
+    ) |> 
+    dplyr::pull(full_s3_path)
+  
+}
+
+if(!aws.s3::object_exists(object = flp_s3_fname)) {
+  
+  flp_basenames = c(
+    "nvc_flp_0_2.tif",
+    "nvc_flp_2_4.tif",
+    "nvc_flp_4_6.tif",
+    "nvc_flp_6_8.tif",
+    "nvc_flp_8_12.tif",
+    "nvc_flp_gt12.tif"
+  )
+  
+  flp_orig_s3_fname = glue::glue("{latest_wildest_run_s3}Project_Final_Results/{flp_basenames}")
+  
+  flp = terra::rast(flp_orig_s3_fname)
+  
+  flp_aoi = flp |> 
+    terra::crop(y = sf::st_transform(aoi, sf::st_crs(flp)), mask = TRUE)
+  
+  terra::writeRaster(
+    x = flp_aoi,
+    filename = flp_local_fname
+  )
+  
+  aws.s3::put_object(
+    file = flp_local_fname,
+    object = flp_s3_fname,
+    multipart = TRUE
+  )
+  
+}
+
+if(!aws.s3::object_exists(object = outyear_bp_s3_fname)) {
+  
+  outyear_bp_orig_s3_path = glue::glue("{latest_wildest_run_s3}Project_Final_Results/outyear_burn_probability.tif")
+  outyear_burn_probability = terra::rast(outyear_bp_orig_s3_path)
+  
+  outyear_burn_probability_aoi = outyear_burn_probability |> 
+    terra::crop(y = sf::st_transform(aoi, sf::st_crs(outyear_burn_probability)), mask = TRUE)
+  
+  terra::writeRaster(
+    x = outyear_burn_probability_aoi,
+    filename = outyear_bp_local_fname
+  )
+  
+  aws.s3::put_object(
+    file = outyear_bp_local_fname,
+    object = outyear_bp_s3_fname,
+    multipart = TRUE
+  )
+  
+}
+
+flp = terra::rast(flp_s3_fname)
+outyear_bp = terra::rast(outyear_bp_s3_fname)
+```
+
+# Map the SARA footprint
+$~$
+Here is the location of the SARA on the landscape (area of interest).
+$~$
+
+```{r fetch_sara_footprint, echo=FALSE, message=FALSE}
+
+if(params$sara_vector_s3_fname != "" & tools::file_ext(x = params$sara_vector_s3_fname) == "gpkg") {
+  sara_footprint_sf_local_fname = file.path(tempdir(), basename(params$sara_vector_s3_fname))
+  aws.s3::save_object(object = params$sara_vector_s3_fname, file = sara_footprint_sf_local_fname)
+  sara_footprint_sf = sf::st_read(sara_footprint_sf_local_fname) |> 
+    sf::st_transform(sf::st_crs(flp))
+}else{if(params$sara_vector_s3_fname != "" & tools::file_ext(x = params$sara_vector_s3_fname) == "zip"){
+   sara_vector_zipped = file.path(tempdir(), basename(params$sara_vector_s3_fname))
+    aws.s3::save_object(object = params$sara_vector_s3_fname, file = sara_vector_zipped)
+    unzip(zipfile=sara_vector_zipped, exdir = file.path(tempdir(), "sara_vector"))
+    sara_vector_unzipped = list.files(file.path(tempdir(), "sara_vector"), pattern=".shp$", full.names=T)
+    sara_footprint_sf = sf::st_read(sara_vector_unzipped) |> 
+    sf::st_transform(sf::st_crs(flp))
+}}
+
+if(params$sara_raster_s3_fname != "") {
+  
+  sara_footprint = terra::rast(params$sara_raster_s3_fname)
+  sara_footprint_mask = !is.na(sara_footprint) |> 
+    setNames("mask")
+  
+  sara_footprint_sf = terra::as.polygons(sara_footprint_mask) |> 
+    sf::st_as_sf() |> 
+    dplyr::filter(mask == 1)
+}
+
+aoi.plot = sf::st_transform(sf::st_geometry(aoi), crs = sf::st_crs(sara_footprint_sf))
+
+plot(sf::st_transform(sf::st_geometry(aoi), crs = sf::st_crs(sara_footprint_sf)))
+plot(sf::st_geometry(sara_footprint_sf), add=T, col = "blue")
+plot(sf::st_transform(sf::st_geometry(aoi), crs = sf::st_crs(sara_footprint_sf)), add=T, bg="transparent")
+
+```
+
+\newpage
+
+# Fire intensity in the analysis area
+$~$
+Here is a plot of the flame length probability raster, binned into flame length categories, across the area of interest. This is the fire behavior we would expect to see, if a given location were to burn, but does not reflect the probability of that location actually burning (see below for burn probability).
+$~$
+
+```{r plot_flame_length_probability, echo=FALSE, warning = F, message = F}
+
+#terra::plot(flp, col = viridis::cividis(100))
+
+tmap_options(max.raster = c(plot = 2000, view = 2000))
+
+tm_shape(flp)+
+  tm_raster(palette=viridis::cividis(100),
+            style = "cont",
+            max.value = 1,
+            title = "Probability",
+            legend.revers = T
+            )+
+  tm_layout(legend.outside = TRUE,
+            panel.labels = c("0-2 ft. Flames", "2-4 ft. Flames", "4-6 ft. Flames",
+                             "6-8 ft. Flames", "8-12 ft. Flames", ">12 ft. Flames"))
+
+```
+\newpage
+
+# Plot of the 10-year cumulative burn probability raster
+$~$
+Here is a plot of the 10-year cumulative burn probability for the area of interest, of any intensity (flame length). For example, the number 0.25 would represent a 25% probability of that location (pixel) burning within the next 10 years, but does not reflect fire behavior (see above for probable flame lengths).
+$~$
+```{r plot_burn_probability, echo=FALSE, message=FALSE, results=FALSE, fig.show="hold", out.width="50%"}
+#terra::plot(outyear_bp, col = viridis::inferno(100))
+
+max.bp = max(values(outyear_bp), na.rm=T)
+max.bp.round = round(max.bp, digits =1)
+
+breaks.bp = seq(0, max.bp.round, by = 0.05)
+
+tmap_options(max.raster = c(plot = 100000, view = 100000))
+
+map_raster_bp <- tm_shape(outyear_bp, raster.downsample=T)+
+  tm_raster(palette=viridis::inferno(100),
+            style = "cont",
+            max.value = 1,
+            breaks= breaks.bp,
+            title = "Probability",
+            legend.reverse = T
+            )+
+  tm_layout(legend.outside = TRUE, 
+              legend.outside.position = "right",
+              legend.format = list(fun = function(x) {
+                ifelse(x %in% breaks.bp, x, "")
+                }))
+
+map_bp <- map_raster_bp +
+  tm_shape(aoi.plot)+
+  tm_borders(col="black")
+
+map_bp
+
+bp_hist <- hist(values(outyear_bp)[!is.na(values(outyear_bp))], breaks=breaks.bp, xlab="10 Year Cumulative Burn Probability, AOI", main = "Histogram of values", col=viridis::inferno(n = length(breaks.bp)))
+
+  
+```
+
+```{r binned burn probability of AOI, echo=FALSE, results = 'asis'}
+#A single 30m pixel (on each side) = 900 Square Meters = 0.2223945 acres (1 square meter = 0.000247105 acres).
+
+rr = paste(breaks.bp[1:length(breaks.bp)-1], breaks.bp[2:length(breaks.bp)], sep= "-")
+bp_area = data.frame(Risk_Range = rr, Acres = round(bp_hist$count*0.2223945, digits = 0), Percent = round(bp_hist$count/sum(bp_hist$count), digits=4)*100)
+
+bp_area  %>%
+  kbl(caption = "TPredicted wildfire exposure for the AOI, base on 10-year burn probability and broken into risk ranges, and expressed as acres and as a proportion of the total",  
+      col.names = c("Range", "Acres", "Percent of Acres (%)"), format="pandoc", booktabs=T, format.args = list(big.mark = ","))
+
+
+```
+
+```{r calculate mean fire hazard, echo=FALSE, message=FALSE}
+# Calculate fire hazard as the burn probability times the probabilistic flame
+# length times the response function for the SARA for each flame length, then
+# summing across those probabilistic effects per pixel to produce a single layer
+# of hazard
+fire_hazard = sum(outyear_bp * flp * params$rf)
+
+# Crop the hazard layer to the SARA footprint and mask to the SARA footprint too
+fire_hazard_cropped = terra::crop(
+  x = fire_hazard, 
+  y = sara_footprint_sf, 
+  mask = TRUE
+)
+```
+
+
+
+```{r calculate burn probability of SARA, echo=FALSE}
+#Crop the burn probability layer to the SARA footprint and mask to the SARA footprint too
+outyear_bp_cropped = terra::crop(
+  x = outyear_bp, 
+  y = sara_footprint_sf, 
+  mask = TRUE
+)
+
+max.bp.sara = round(max(values(outyear_bp_cropped), na.rm=T), digits=2)
+min.bp.sara = round(min(values(outyear_bp_cropped), na.rm=T), digits=2)
+
+
+```
+
+```{r calculate mean burn probability of SARA, echo=FALSE}
+## Calculate the expected mean 10-year burn probability across the SARA footprint (expressed as a proportion)
+sara_10yr_burn_prob = exactextractr::exact_extract(
+  x = outyear_bp_cropped, 
+  y = sara_footprint_sf, 
+  fun = "mean"
+)
+
+```
+
+\newpage
+
+## Analyze the 10-year burn probability of the SARA
+$~$
+Here is a map, histogram, and table summarizing the 10-year cumulative burn probability within the footprint of the SARA (resource) of interest, which ranges from `r min.bp.sara*100` % to `r max.bp.sara*100` %, with a mean value of `r round(sara_10yr_burn_prob, digits = 2)*100` %.
+$~$
+
+
+```{r plot burn probability of SARA, echo=FALSE, message = F, fig.show="hold", out.width="50%"}
+tmap_options(max.raster = c(plot = 100000, view = 100000))
+
+map_raster_bp_cropped <- tm_shape(outyear_bp_cropped, raster.downsample=T)+
+  tm_raster(palette=viridis::inferno(100),
+            style = "cont",
+            max.value = 1,
+            breaks= breaks.bp,
+            title = "Probability",
+            legend.reverse = T
+            )+
+  tm_layout(legend.outside = TRUE, 
+              legend.outside.position = "right",
+              legend.format = list(fun = function(x) {
+                ifelse(x %in% breaks.bp, x, "")
+                }))
+
+map_bp_cropped <- map_raster_bp_cropped +
+  tm_shape(aoi.plot)+
+  tm_borders(col="black")
+
+
+map_bp_cropped
+
+bp_cropped_hist <- hist(values(outyear_bp_cropped)[!is.na(values(outyear_bp_cropped))], breaks = seq(0, max.bp.round, by = 0.05), xlab="10 Year Cumulative Burn Probability, SARA", main = "Histogram of values", col=viridis::inferno(n = length(breaks.bp)))
+
+
+```
+
+
+```{r binned burn probability of SARA, echo=FALSE, results = 'asis'}
+#A single 30m pixel (on each side) = 900 Square Meters = 0.2223945 acres (1 square meter = 0.000247105 acres).
+
+rr = paste(breaks.bp[1:length(breaks.bp)-1], breaks.bp[2:length(breaks.bp)], sep= "-")
+bp_area_cropped = data.frame(Risk_Range = rr, SARA_Acres = round(bp_cropped_hist$count*0.2223945, digits = 0), SARA_Percent = round(bp_cropped_hist$count/sum(bp_cropped_hist$count), digits=4)*100)
+
+bp_area_cropped  %>%
+  kbl(caption = "Predicted wildfire exposure for the SARA, base on 10-year burn probability and broken into risk ranges, and expressed as acres and as a proportion of the total",  
+      col.names = c("Range", "Acres", "Percent of Acres (%)"), format="pandoc", booktabs=T, format.args = list(big.mark = ","))
+
+
+```
+
+
+\newpage
+
+## Analysis of the expected fire behavior, expressed as flame length probabilities, within the SARA
+$~$
+Flame length categories are: 0-2 feet, 2-4 feet, 4-6 feet, 6-8 feet, 8-12 feet, and greater than 12 feet.
+$~$
+```{r plot flame length in SARA, echo=FALSE}
+#Crop the burn probability layer to the SARA footprint and mask to the SARA footprint too
+flp_cropped = terra::crop(
+  x = flp, 
+  y = sara_footprint_sf, 
+  mask = TRUE
+)
+
+
+tmap_options(max.raster = c(plot = 100000, view = 100000))
+
+tm_shape(flp_cropped)+
+  tm_raster(palette=viridis::cividis(100),
+            style = "cont",
+            max.value = 1,
+            title = "Probability",
+            legend.revers = T
+            )+
+  tm_facets(ncol = 3)+
+  tm_layout(legend.outside = TRUE,
+            panel.labels = c("0-2 ft. Flames", "2-4 ft. Flames", "4-6 ft. Flames",
+                             "6-8 ft. Flames", "8-12 ft. Flames", ">12 ft. Flames"))
+```
+
+
+
+```{r calculate flame lentgths of SARA, echo=FALSE}
+## Calculate the expected mean probability of different flame lengths across the SARA footprint
+sara_flp_prob = exactextractr::exact_extract(
+  x = flp_cropped, 
+  y = sara_footprint_sf, 
+  fun = "mean"
+)
+
+#sara_flp_prob2 = terra::extract(flp_cropped, sara_footprint_sf, fun="mean")
+
+```
+
+
+```{r calculate expected change in SARA value, echo=FALSE}
+## Calculate the expected mean change in SARA value across the whole landscape
+sara_value_change = exactextractr::exact_extract(
+  x = fire_hazard_cropped, 
+  y = sara_footprint_sf, 
+  fun = "mean"
+)
+```
+
+```{r calculate conditional change in SARA value if it burns, echo=FALSE}
+## Calculate the potential/conditional change in SARA value, if it burns
+## Then calculate expected mean conditional change in SARA value across the whole landscape
+
+conditional_loss = sum(flp * params$rf)
+conditional_loss_all_flips = (sara_flp_prob*params$rf)
+
+# Crop the hazard layer to the SARA footprint and mask to the SARA footprint too
+conditional_loss_cropped = terra::crop(
+  x = conditional_loss, 
+  y = sara_footprint_sf, 
+  mask = TRUE
+)
+
+sara_potential_value_change = exactextractr::exact_extract(
+  x = conditional_loss_cropped, 
+  y = sara_footprint_sf, 
+  fun = "mean"
+)
+```
+
+\newpage
+
+## Analysis of the potential change in SARA value if a fire occurs
+$~$
+This is the expected response of the SARA to predicted flame lengths, if a fire were to occur. It is the proportional change, not percent change.
+$~$
+
+```{r Plot potential SARA change, echo=FALSE, message=FALSE, results=FALSE, fig.show="hold", out.width="50%"}
+
+max.cl = max(values(conditional_loss_cropped), na.rm=T)
+max.cl.round = round(max.cl, digits =1)
+
+min.cl = min(values(conditional_loss_cropped), na.rm=T)
+min.cl.round = round(min.cl, digits =1)
+
+#breaks.cl = seq(min.cl.round, max.cl.round, by = 0.05)
+breaks.cl = seq(-1, 1, by = 0.1)
+col.cl = get_brewer_pal("RdYlBu", n=length(breaks.cl), plot=F)
+tmap_options(max.raster = c(plot = 100000, view = 100000))
+
+map_raster_cl <- tm_shape(conditional_loss_cropped, raster.downsample=T)+
+  tm_raster(palette=get_brewer_pal("RdYlBu", n=100, plot=F),
+            style = "cont",
+            max.value = 1,
+            breaks= breaks.cl,
+            title = "Proportional Change",
+            legend.reverse = T
+            )+
+  tm_layout(legend.outside = TRUE, 
+              legend.outside.position = "right",
+              legend.format = list(fun = function(x) {
+                ifelse(x %in% breaks.cl, x, "")
+                }))
+
+map_cl <- map_raster_cl +
+  tm_shape(aoi.plot)+
+  tm_borders(col="black")
+
+map_cl
+
+cl_hist_cropped <- hist(values(conditional_loss_cropped)[!is.na(values(conditional_loss_cropped))], breaks=breaks.cl, xlab="Potential proportional Change in SARA Value", main = "Histogram of values", col=col.cl)
+
+```
+
+```{r binned potential change (susceptibility), echo=FALSE, results = 'asis'}
+#A single 30m pixel (on each side) = 900 Square Meters = 0.2223945 acres (1 square meter = 0.000247105 acres).
+
+rfr = paste(breaks.cl[1:length(breaks.cl)-1], breaks.cl[2:length(breaks.cl)], sep= "-")
+cond_loss_area = data.frame(RF_Range = rfr, Acres = round(cl_hist_cropped$count*0.2223945, digits = 0), Percent = round(cl_hist_cropped$count/sum(cl_hist_cropped$count), digits=4)*100)
+
+cond_loss_area  %>%
+  kbl(caption = "Predicted proportional change in SARA value, if a fire were to occur (conditional loss/gain)",  
+      col.names = c("Range", "Acres", "Percent of Acres (%)"), format="pandoc", booktabs=T, format.args = list(big.mark = ","))
+
+
+```
+
+\newpage
+
+## Analysis of the expected change in SARA value (fire hazard) in a "no action" scenario
+$~$
+This fire hazard analysis includes a) expected fire behavior (flame lengths) if a burn occurs, b) 10-year probability of a burn occurring, and c) expected SARA response to fire behavior (response functions) to get to an expected 10-year change in SARA value.
+$~$
+
+```{r plot fire hazard of SARA, echo=FALSE, message=FALSE, results=FALSE, fig.show="hold", out.width="50%"}
+
+max.fh = max(values(fire_hazard_cropped), na.rm=T)
+max.fh.round = round(max.fh, digits =1)
+
+min.fh = min(values(fire_hazard_cropped), na.rm=T)
+min.fh.round = round(min.fh, digits =1)
+
+#breaks.cl = seq(min.cl.round, max.cl.round, by = 0.05)
+breaks.fh = seq(-1, 1, by = 0.1)
+col.fh = get_brewer_pal("RdYlBu", n=length(breaks.cl), plot=F)
+tmap_options(max.raster = c(plot = 100000, view = 100000))
+
+map_raster_fh <- tm_shape(fire_hazard_cropped, raster.downsample=T)+
+  tm_raster(palette=get_brewer_pal("RdYlBu", n=100, plot=F),
+            style = "cont",
+            max.value = 1,
+            breaks= breaks.cl,
+            title = "Proportional Change",
+            legend.reverse = T
+            )+
+  tm_layout(legend.outside = TRUE, 
+              legend.outside.position = "right",
+              legend.format = list(fun = function(x) {
+                ifelse(x %in% breaks.fh, x, "")
+                }))
+
+map_fh <- map_raster_fh +
+  tm_shape(aoi.plot)+
+  tm_borders(col="black")
+
+map_fh
+
+fh_hist_cropped <- hist(values(fire_hazard_cropped)[!is.na(values(fire_hazard_cropped))], breaks=breaks.fh, xlab="Expected proportional Change in SARA Value", main = "Histogram of values", col=col.cl)
+```
+
+```{r binned expected change (susceptibility), echo=FALSE, results = 'asis'}
+#A single 30m pixel (on each side) = 900 Square Meters = 0.2223945 acres (1 square meter = 0.000247105 acres).
+
+fhr = paste(breaks.fh[1:length(breaks.fh)-1], breaks.fh[2:length(breaks.fh)], sep= "-")
+cond_loss_area = data.frame(RF_Range = rfr, Acres = round(fh_hist_cropped$count*0.2223945, digits = 0), Percent = round(fh_hist_cropped$count/sum(fh_hist_cropped$count), digits=4)*100)
+
+cond_loss_area  %>%
+  kbl(caption = "Predicted proportional change in SARA value, no action scenario",  
+      col.names = c("Range", "Acres", "Percent of Acres (%)"), format="pandoc", booktabs=T, format.args = list(big.mark = ","))
+
+
+```
+
+##Summary
+$~$
+Across the whole landscape, we expect the `r params$sara_name` SARA to `r ifelse(test = sara_value_change > 0, yes = "increase in", no = ifelse(test = sara_value_change == 0, yes = "stay the same", no = "decrease in"))` value over the next 10 years.
+Its 10-year average burn probability is `r round(sara_10yr_burn_prob, digits = 3)*100` %.
+Its potential change in value if it burns, on average, would be `r round(sara_potential_value_change, digits = 3)*100` %.
+Its response to fire hazard (which factors in the 10-year burn probability, the expected flame lengths if it burns, and the expected species response to those flame lengths) if we do nothing will be `r round(sara_value_change, digits = 3)*100` % change in value.
+
+
+```{r SummaryTable, echo=FALSE, message = FALSE, warning = FALSE, results = 'asis'}
+output = cbind(c("Mean probability (%)", "RF (% change)", "Potential change (%)"), rbind(round(sara_flp_prob, digits=2)*100, round(params$rf, digits=2)*100, round(conditional_loss_all_flips, digits=2)*100))
+colnames(output) <- c("Variable", "0-2 ft", "2-4 ft", "4-6 ft", "6-8 ft", "8-12 ft", ">12 ft")
+
+
+output  %>%
+  kbl(caption = "Expected flame length probability and SARA expected response (% change in value)",  format="pandoc", booktabs=T)
+
+
+```
+
+
+
+
