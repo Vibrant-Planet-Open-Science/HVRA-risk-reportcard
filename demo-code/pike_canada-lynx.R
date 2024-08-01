@@ -1,36 +1,26 @@
-landscape_name = "pike"
-sara_name = "canada-lynx"
-dir.root = "~/Library/CloudStorage/GoogleDrive-sophie@vibrantplanet.net/Shared drives/VP - Science Group/"
-rf.data = read.csv(paste(dir.root, "projects/rf-generator/response-function-notebooks", sara_name, paste(sara_name, "-de-rf", ".csv", sep=""), sep="/"))
-rf.values = rf.data$value
+landscape_name = "pike" #landscape for QWRA, demo on the Pike San Isabel landscape
+hvra_name = "canada-lynx" #name of the highly valuable resource or asset you want to assess
+rf.data = read.csv(here::here("demo-data", "global_canada-lynx_disturbance-rf.csv")) #example hvra response function for Canada Lynx
+rf.values = rf.data$rf_value
 
-output_basename = glue::glue("fire-hazard_{sara_name}.pdf")
-output_local_fname = here::here("Notebooks", sara_name, landscape_name, output_basename)
+output_basename = glue::glue("{landscape_name}_{hvra_name}_fire-hazard-report-card.html")
+output_local_fname = here::here("docs", output_basename)
 
 dir.create(dirname(output_local_fname), showWarnings = FALSE)
 
-output_s3_fname = glue::glue("s3://vp-sci-grp/prototypes/reportcard/processed/landscapes/{landscape_name}/{output_basename}")
-
 params = list(
   landscape_name = landscape_name, 
-  sara_vector_s3_fname = "s3://vp-sci-grp/prototypes/reportcard/raw/LynxHbt121115_polys_all.zip",
-  sara_raster_s3_fname = "",
-  rf = rf.values,
-  session_ingest = "",
-  session_automation = ""
+  hvra_vector_fname = here::here("demo-data", glue::glue("{landscape_name}_{hvra_name}_footprint.gpkg")),
+  flp_fname = glue::glue("s3://vp-sci-grp/prototypes/reportcard/interim/landscapes/{landscape_name}/flp.tif"),
+  outyear_bp_fname = glue::glue("s3://vp-sci-grp/prototypes/reportcard/interim/landscapes/{landscape_name}/outyear_burn_probability.tif"),
+  aoi_fname = here::here("demo-data", glue::glue("{landscape_name}_aoi.gpkg")),
+  rf = rf.values
 )
   
 tictoc::tic()
 rmarkdown::render(
-  input = here::here("Notebooks", sara_name, "04_fire-hazard-per-sara-on-a-landscape.Rmd"), 
+  input = here::here("demo-code", "fire-hazard-per-hvra-on-a-landscape.Rmd"), 
   params = params, 
   output_file = output_local_fname
 )
 tictoc::toc()
-
-aws.s3::put_object(
-  file = output_local_fname,
-  object = output_s3_fname,
-  multipart = TRUE
-)
-

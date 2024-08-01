@@ -1,0 +1,453 @@
+---
+title: "Fire hazard for `r params$hvra_name` in the `r stringr::str_to_title(params$landscape_name)` Landscape"
+author: "Sophie Gilbert, Mike Koontz, Katharyn Duffy, Vibrant Planet"
+date: "`r Sys.Date()`"
+output: html_document
+indent: false
+# params:
+#   landscape_name: ""
+#   hvra_vector_fname: ""
+#   hvra_name: ""
+#   flp_fname: ""
+#   outyear_bp_fname: ""
+#   aoi_fname: ""
+#   rf: ""
+---
+
+```{r load libraries, echo=FALSE, message=FALSE, results=FALSE}
+library(aws.s3)
+library(dplyr)
+library(kableExtra)
+library(tmaptools)
+library(colorRamps)
+library(viridis)
+library(tmap)
+library(terra)
+
+
+```
+
+```{r fetch the aoi}
+aoi = sf::st_read(params$aoi_fname)
+```
+
+
+```{r get flp and bp data and crop, echo=FALSE, message=FALSE, results=FALSE}
+flp = terra::rast(params$flp_fname)
+outyear_bp = terra::rast(params$outyear_bp_fname)
+```
+
+# Map the HVRA footprint
+$~$
+Here is the location of the HVRA on the landscape (area of interest).
+$~$
+
+```{r fetch_hvra_footprint, echo=FALSE, message=FALSE}
+
+if(params$hvra_vector_fname != "" & tools::file_ext(x = params$hvra_vector_fname) == "gpkg") {
+  
+  hvra_footprint_sf = sf::st_read(params$hvra_vector_fname) |> 
+    sf::st_transform(sf::st_crs(flp))
+  
+} else {
+  message("Must provide a path to a .gpkg representing the HVRA geometry.")
+}
+
+aoi.plot = sf::st_transform(sf::st_geometry(aoi), crs = sf::st_crs(hvra_footprint_sf))
+
+plot(sf::st_transform(sf::st_geometry(aoi), crs = sf::st_crs(hvra_footprint_sf)))
+plot(sf::st_geometry(hvra_footprint_sf), add = TRUE, col = "blue")
+plot(
+  sf::st_transform(
+    sf::st_geometry(aoi), 
+    crs = sf::st_crs(hvra_footprint_sf
+    )
+  ), 
+  add = TRUE, 
+  bg="transparent"
+)
+
+```
+
+\newpage
+
+# Fire intensity in the analysis area
+$~$
+Here is a plot of the flame length probability raster, binned into flame length categories, across the area of interest. This is the fire behavior we would expect to see, if a given location were to burn, but does not reflect the probability of that location actually burning (see below for burn probability).
+$~$
+
+```{r plot_flame_length_probability, echo=FALSE, warning = F, message = F}
+
+#terra::plot(flp, col = viridis::cividis(100))
+
+tmap_options(max.raster = c(plot = 2000, view = 2000))
+
+tm_shape(flp)+
+  tm_raster(palette=viridis::cividis(100),
+            style = "cont",
+            max.value = 1,
+            title = "Probability",
+            legend.revers = TRUE
+  )+
+  tm_layout(legend.outside = TRUE,
+            panel.labels = c("0-2 ft. Flames", "2-4 ft. Flames", "4-6 ft. Flames",
+                             "6-8 ft. Flames", "8-12 ft. Flames", ">12 ft. Flames"))
+
+```
+\newpage
+
+# Plot of the 10-year cumulative burn probability raster
+$~$
+Here is a plot of the 10-year cumulative burn probability for the area of interest, of any intensity (flame length). For example, the number 0.25 would represent a 25% probability of that location (pixel) burning within the next 10 years, but does not reflect fire behavior (see above for probable flame lengths).
+$~$
+```{r plot_burn_probability, echo=FALSE, message=FALSE, results=FALSE, fig.show="hold", out.width="50%"}
+#terra::plot(outyear_bp, col = viridis::inferno(100))
+
+max.bp = max(values(outyear_bp), na.rm=T)
+max.bp.round = round(max.bp, digits =1)
+
+breaks.bp = seq(0, max.bp.round, by = 0.05)
+
+tmap_options(max.raster = c(plot = 100000, view = 100000))
+
+map_raster_bp <- tm_shape(outyear_bp, raster.downsample=T)+
+  tm_raster(palette=viridis::inferno(100),
+            style = "cont",
+            max.value = 1,
+            breaks= breaks.bp,
+            title = "Probability",
+            legend.reverse = T
+  )+
+  tm_layout(legend.outside = TRUE, 
+            legend.outside.position = "right",
+            legend.format = list(fun = function(x) {
+              ifelse(x %in% breaks.bp, x, "")
+            }))
+
+map_bp <- map_raster_bp +
+  tm_shape(aoi.plot)+
+  tm_borders(col="black")
+
+map_bp
+
+bp_hist <- hist(values(outyear_bp)[!is.na(values(outyear_bp))], breaks=breaks.bp, xlab="10 Year Cumulative Burn Probability, AOI", main = "Histogram of values", col=viridis::inferno(n = length(breaks.bp)))
+
+
+```
+
+```{r binned burn probability of AOI, echo=FALSE, results = 'asis'}
+#A single 30m pixel (on each side) = 900 Square Meters = 0.2223945 acres (1 square meter = 0.000247105 acres).
+
+rr = paste(breaks.bp[1:length(breaks.bp)-1], breaks.bp[2:length(breaks.bp)], sep= "-")
+bp_area = data.frame(Risk_Range = rr, Acres = round(bp_hist$count*0.2223945, digits = 0), Percent = round(bp_hist$count/sum(bp_hist$count), digits=4)*100)
+
+bp_area  %>%
+  kbl(caption = "TPredicted wildfire exposure for the AOI, base on 10-year burn probability and broken into risk ranges, and expressed as acres and as a proportion of the total",  
+      col.names = c("Range", "Acres", "Percent of Acres (%)"), format="pandoc", booktabs=T, format.args = list(big.mark = ","))
+
+
+```
+
+```{r calculate mean fire hazard, echo=FALSE, message=FALSE}
+# Calculate fire hazard as the burn probability times the probabilistic flame
+# length times the response function for the hvra for each flame length, then
+# summing across those probabilistic effects per pixel to produce a single layer
+# of hazard
+fire_hazard = sum(outyear_bp * flp * params$rf)
+
+# Crop the hazard layer to the hvra footprint and mask to the hvra footprint too
+fire_hazard_cropped = terra::crop(
+  x = fire_hazard, 
+  y = hvra_footprint_sf, 
+  mask = TRUE
+)
+```
+
+
+
+```{r calculate burn probability of hvra, echo=FALSE}
+#Crop the burn probability layer to the hvra footprint and mask to the hvra footprint too
+outyear_bp_cropped = terra::crop(
+  x = outyear_bp, 
+  y = hvra_footprint_sf, 
+  mask = TRUE
+)
+
+max.bp.hvra = round(max(values(outyear_bp_cropped), na.rm=T), digits=2)
+min.bp.hvra = round(min(values(outyear_bp_cropped), na.rm=T), digits=2)
+
+
+```
+
+```{r calculate mean burn probability of hvra, echo=FALSE}
+## Calculate the expected mean 10-year burn probability across the hvra footprint (expressed as a proportion)
+hvra_10yr_burn_prob = exactextractr::exact_extract(
+  x = outyear_bp_cropped, 
+  y = hvra_footprint_sf, 
+  fun = "mean"
+)
+
+```
+
+\newpage
+
+## Analyze the 10-year burn probability of the hvra
+$~$
+Here is a map, histogram, and table summarizing the 10-year cumulative burn probability within the footprint of the hvra (resource) of interest, which ranges from `r min.bp.hvra*100` % to `r max.bp.hvra*100` %, with a mean value of `r round(hvra_10yr_burn_prob, digits = 2)*100` %.
+$~$
+
+
+```{r plot burn probability of hvra, echo=FALSE, message = F, fig.show="hold", out.width="50%"}
+tmap_options(max.raster = c(plot = 100000, view = 100000))
+
+map_raster_bp_cropped <- tm_shape(outyear_bp_cropped, raster.downsample=T)+
+  tm_raster(palette=viridis::inferno(100),
+            style = "cont",
+            max.value = 1,
+            breaks= breaks.bp,
+            title = "Probability",
+            legend.reverse = T
+  )+
+  tm_layout(legend.outside = TRUE, 
+            legend.outside.position = "right",
+            legend.format = list(fun = function(x) {
+              ifelse(x %in% breaks.bp, x, "")
+            }))
+
+map_bp_cropped <- map_raster_bp_cropped +
+  tm_shape(aoi.plot)+
+  tm_borders(col="black")
+
+
+map_bp_cropped
+
+bp_cropped_hist <- hist(values(outyear_bp_cropped)[!is.na(values(outyear_bp_cropped))], breaks = seq(0, max.bp.round, by = 0.05), xlab="10 Year Cumulative Burn Probability, hvra", main = "Histogram of values", col=viridis::inferno(n = length(breaks.bp)))
+
+
+```
+
+
+```{r binned burn probability of hvra, echo=FALSE, results = 'asis'}
+#A single 30m pixel (on each side) = 900 Square Meters = 0.2223945 acres (1 square meter = 0.000247105 acres).
+
+rr = paste(breaks.bp[1:length(breaks.bp)-1], breaks.bp[2:length(breaks.bp)], sep= "-")
+bp_area_cropped = data.frame(Risk_Range = rr, hvra_Acres = round(bp_cropped_hist$count*0.2223945, digits = 0), hvra_Percent = round(bp_cropped_hist$count/sum(bp_cropped_hist$count), digits=4)*100)
+
+bp_area_cropped  %>%
+  kbl(caption = "Predicted wildfire exposure for the hvra, base on 10-year burn probability and broken into risk ranges, and expressed as acres and as a proportion of the total",  
+      col.names = c("Range", "Acres", "Percent of Acres (%)"), format="pandoc", booktabs=T, format.args = list(big.mark = ","))
+
+
+```
+
+
+\newpage
+
+## Analysis of the expected fire behavior, expressed as flame length probabilities, within the hvra
+$~$
+Flame length categories are: 0-2 feet, 2-4 feet, 4-6 feet, 6-8 feet, 8-12 feet, and greater than 12 feet.
+$~$
+```{r plot flame length in hvra, echo=FALSE}
+#Crop the burn probability layer to the hvra footprint and mask to the hvra footprint too
+flp_cropped = terra::crop(
+  x = flp, 
+  y = hvra_footprint_sf, 
+  mask = TRUE
+)
+
+
+tmap_options(max.raster = c(plot = 100000, view = 100000))
+
+tm_shape(flp_cropped)+
+  tm_raster(palette=viridis::cividis(100),
+            style = "cont",
+            max.value = 1,
+            title = "Probability",
+            legend.revers = T
+  )+
+  tm_facets(ncol = 3)+
+  tm_layout(legend.outside = TRUE,
+            panel.labels = c("0-2 ft. Flames", "2-4 ft. Flames", "4-6 ft. Flames",
+                             "6-8 ft. Flames", "8-12 ft. Flames", ">12 ft. Flames"))
+```
+
+
+
+```{r calculate flame lentgths of hvra, echo=FALSE}
+## Calculate the expected mean probability of different flame lengths across the hvra footprint
+hvra_flp_prob = exactextractr::exact_extract(
+  x = flp_cropped, 
+  y = hvra_footprint_sf, 
+  fun = "mean"
+)
+
+#hvra_flp_prob2 = terra::extract(flp_cropped, hvra_footprint_sf, fun="mean")
+
+```
+
+
+```{r calculate expected change in hvra value, echo=FALSE}
+## Calculate the expected mean change in hvra value across the whole landscape
+hvra_value_change = exactextractr::exact_extract(
+  x = fire_hazard_cropped, 
+  y = hvra_footprint_sf, 
+  fun = "mean"
+)
+```
+
+```{r calculate conditional change in hvra value if it burns, echo=FALSE}
+## Calculate the potential/conditional change in hvra value, if it burns
+## Then calculate expected mean conditional change in hvra value across the whole landscape
+
+conditional_loss = sum(flp * params$rf)
+conditional_loss_all_flips = (hvra_flp_prob*params$rf)
+
+# Crop the hazard layer to the hvra footprint and mask to the hvra footprint too
+conditional_loss_cropped = terra::crop(
+  x = conditional_loss, 
+  y = hvra_footprint_sf, 
+  mask = TRUE
+)
+
+hvra_potential_value_change = exactextractr::exact_extract(
+  x = conditional_loss_cropped, 
+  y = hvra_footprint_sf, 
+  fun = "mean"
+)
+```
+
+\newpage
+
+## Analysis of the potential change in hvra value if a fire occurs
+$~$
+This is the expected response of the hvra to predicted flame lengths, if a fire were to occur. It is the proportional change, not percent change.
+$~$
+
+```{r Plot potential hvra change, echo=FALSE, message=FALSE, results=FALSE, fig.show="hold", out.width="50%"}
+
+max.cl = max(values(conditional_loss_cropped), na.rm=T)
+max.cl.round = round(max.cl, digits =1)
+
+min.cl = min(values(conditional_loss_cropped), na.rm=T)
+min.cl.round = round(min.cl, digits =1)
+
+#breaks.cl = seq(min.cl.round, max.cl.round, by = 0.05)
+breaks.cl = seq(-1, 1, by = 0.1)
+col.cl = get_brewer_pal("RdYlBu", n=length(breaks.cl), plot=F)
+tmap_options(max.raster = c(plot = 100000, view = 100000))
+
+map_raster_cl <- tm_shape(conditional_loss_cropped, raster.downsample=T)+
+  tm_raster(palette=get_brewer_pal("RdYlBu", n=100, plot=F),
+            style = "cont",
+            max.value = 1,
+            breaks= breaks.cl,
+            title = "Proportional Change",
+            legend.reverse = T
+  )+
+  tm_layout(legend.outside = TRUE, 
+            legend.outside.position = "right",
+            legend.format = list(fun = function(x) {
+              ifelse(x %in% breaks.cl, x, "")
+            }))
+
+map_cl <- map_raster_cl +
+  tm_shape(aoi.plot)+
+  tm_borders(col="black")
+
+map_cl
+
+cl_hist_cropped <- hist(values(conditional_loss_cropped)[!is.na(values(conditional_loss_cropped))], breaks=breaks.cl, xlab="Potential proportional Change in hvra Value", main = "Histogram of values", col=col.cl)
+
+```
+
+```{r binned potential change (susceptibility), echo=FALSE, results = 'asis'}
+#A single 30m pixel (on each side) = 900 Square Meters = 0.2223945 acres (1 square meter = 0.000247105 acres).
+
+rfr = paste(breaks.cl[1:length(breaks.cl)-1], breaks.cl[2:length(breaks.cl)], sep= "-")
+cond_loss_area = data.frame(RF_Range = rfr, Acres = round(cl_hist_cropped$count*0.2223945, digits = 0), Percent = round(cl_hist_cropped$count/sum(cl_hist_cropped$count), digits=4)*100)
+
+cond_loss_area  %>%
+  kbl(caption = "Predicted proportional change in hvra value, if a fire were to occur (conditional loss/gain)",  
+      col.names = c("Range", "Acres", "Percent of Acres (%)"), format="pandoc", booktabs=T, format.args = list(big.mark = ","))
+
+
+```
+
+\newpage
+
+## Analysis of the expected change in hvra value (fire hazard) in a "no action" scenario
+$~$
+This fire hazard analysis includes a) expected fire behavior (flame lengths) if a burn occurs, b) 10-year probability of a burn occurring, and c) expected hvra response to fire behavior (response functions) to get to an expected 10-year change in hvra value.
+$~$
+
+```{r plot fire hazard of hvra, echo=FALSE, message=FALSE, results=FALSE, fig.show="hold", out.width="50%"}
+
+max.fh = max(values(fire_hazard_cropped), na.rm=T)
+max.fh.round = round(max.fh, digits =1)
+
+min.fh = min(values(fire_hazard_cropped), na.rm=T)
+min.fh.round = round(min.fh, digits =1)
+
+#breaks.cl = seq(min.cl.round, max.cl.round, by = 0.05)
+breaks.fh = seq(-1, 1, by = 0.1)
+col.fh = get_brewer_pal("RdYlBu", n=length(breaks.cl), plot=F)
+tmap_options(max.raster = c(plot = 100000, view = 100000))
+
+map_raster_fh <- tm_shape(fire_hazard_cropped, raster.downsample=T)+
+  tm_raster(palette=get_brewer_pal("RdYlBu", n=100, plot=F),
+            style = "cont",
+            max.value = 1,
+            breaks= breaks.cl,
+            title = "Proportional Change",
+            legend.reverse = T
+  )+
+  tm_layout(legend.outside = TRUE, 
+            legend.outside.position = "right",
+            legend.format = list(fun = function(x) {
+              ifelse(x %in% breaks.fh, x, "")
+            }))
+
+map_fh <- map_raster_fh +
+  tm_shape(aoi.plot)+
+  tm_borders(col="black")
+
+map_fh
+
+fh_hist_cropped <- hist(values(fire_hazard_cropped)[!is.na(values(fire_hazard_cropped))], breaks=breaks.fh, xlab="Expected proportional Change in hvra Value", main = "Histogram of values", col=col.cl)
+```
+
+```{r binned expected change (susceptibility), echo=FALSE, results = 'asis'}
+#A single 30m pixel (on each side) = 900 Square Meters = 0.2223945 acres (1 square meter = 0.000247105 acres).
+
+fhr = paste(breaks.fh[1:length(breaks.fh)-1], breaks.fh[2:length(breaks.fh)], sep= "-")
+cond_loss_area = data.frame(RF_Range = rfr, Acres = round(fh_hist_cropped$count*0.2223945, digits = 0), Percent = round(fh_hist_cropped$count/sum(fh_hist_cropped$count), digits=4)*100)
+
+cond_loss_area  %>%
+  kbl(caption = "Predicted proportional change in hvra value, no action scenario",  
+      col.names = c("Range", "Acres", "Percent of Acres (%)"), format="pandoc", booktabs=T, format.args = list(big.mark = ","))
+
+
+```
+
+## Summary
+$~$
+Across the whole landscape, we expect the `r params$hvra_name` hvra to `r ifelse(test = hvra_value_change > 0, yes = "increase in", no = ifelse(test = hvra_value_change == 0, yes = "stay the same", no = "decrease in"))` value over the next 10 years.
+Its 10-year average burn probability is `r round(hvra_10yr_burn_prob, digits = 3)*100` %.
+Its potential change in value if it burns, on average, would be `r round(hvra_potential_value_change, digits = 3)*100` %.
+Its response to fire hazard (which factors in the 10-year burn probability, the expected flame lengths if it burns, and the expected species response to those flame lengths) if we do nothing will be `r round(hvra_value_change, digits = 3)*100` % change in value.
+
+
+```{r SummaryTable, echo=FALSE, message = FALSE, warning = FALSE, results = 'asis'}
+output = cbind(c("Mean probability (%)", "RF (% change)", "Potential change (%)"), rbind(round(hvra_flp_prob, digits=2)*100, round(params$rf, digits=2)*100, round(conditional_loss_all_flips, digits=2)*100))
+colnames(output) <- c("Variable", "0-2 ft", "2-4 ft", "4-6 ft", "6-8 ft", "8-12 ft", ">12 ft")
+
+
+output  %>%
+  kbl(caption = "Expected flame length probability and hvra expected response (% change in value)",  format="pandoc", booktabs=T)
+
+
+```
+
+
+
+

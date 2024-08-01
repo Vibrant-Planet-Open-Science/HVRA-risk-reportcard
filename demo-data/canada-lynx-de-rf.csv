@@ -1,7 +1,0 @@
-disturbance_type,intensity_class,sara_id,spatial_predictor,predictor_value,value,name,objective
-Fire,1,252,GLOBAL,0,-0.221,Canada Lynx Habitat,bdv
-Fire,2,252,GLOBAL,0,-0.221,Canada Lynx Habitat,bdv
-Fire,3,252,GLOBAL,0,-0.224,Canada Lynx Habitat,bdv
-Fire,4,252,GLOBAL,0,-0.225,Canada Lynx Habitat,bdv
-Fire,5,252,GLOBAL,0,-0.254,Canada Lynx Habitat,bdv
-Fire,6,252,GLOBAL,0,-0.503,Canada Lynx Habitat,bdv
