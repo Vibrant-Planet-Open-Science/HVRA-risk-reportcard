@@ -11,16 +11,17 @@ dir.create(dirname(output_local_fname), showWarnings = FALSE)
 params = list(
   landscape_name = landscape_name, 
   hvra_vector_fname = here::here("demo-data", glue::glue("{landscape_name}_{hvra_name}_footprint.gpkg")),
+  hvra_name = "canada-lynx",
   flp_fname = glue::glue("s3://vp-sci-grp/prototypes/reportcard/interim/landscapes/{landscape_name}/flp.tif"),
   outyear_bp_fname = glue::glue("s3://vp-sci-grp/prototypes/reportcard/interim/landscapes/{landscape_name}/outyear_burn_probability.tif"),
   aoi_fname = here::here("demo-data", glue::glue("{landscape_name}_aoi.gpkg")),
   rf = rf.values
 )
   
-tictoc::tic()
+#tictoc::tic()
 rmarkdown::render(
   input = here::here("demo-code", "fire-hazard-per-hvra-on-a-landscape.Rmd"), 
   params = params, 
   output_file = output_local_fname
 )
-tictoc::toc()
+#tictoc::toc()
