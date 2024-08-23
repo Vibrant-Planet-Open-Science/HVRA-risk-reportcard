@@ -31,14 +31,14 @@ options(scipen = 999)
 aoi = sf::st_read(params$aoi_fname)
 ```
 
-```{r get flp and bp data and crop, echo=FALSE, message=FALSE, results=FALSE, cache=TRUE}
+```{r get flp and bp data and crop, echo=FALSE, message=FALSE, results=FALSE}
 flp = terra::rast(params$flp_fname)
 outyear_bp = terra::rast(params$outyear_bp_fname)
 ```
 
 # Map the HVRA footprint
 
-The map below shows the location of the HVRA relative to the `params$landscape_name` landscape (or area of interest).
+The map below shows the location of the HVRA relative to the `r params$landscape_name` landscape (or area of interest).
 
 ```{r fetch_hvra_footprint, echo=FALSE, message=FALSE}
 
@@ -74,7 +74,7 @@ plot(
 
 Here is a plot of the flame length probability raster, binned into flame length categories, across the area of interest. This is the fire behavior we would expect to see, if a given location were to burn, but does not reflect the probability of that location actually burning (see burn probability below).
 
-```{r plot_flame_length_probability, echo=FALSE, warning = FALSE, message = FALSE, cache=TRUE}
+```{r plot_flame_length_probability, echo=FALSE, warning = FALSE, message = FALSE}
 
 #terra::plot(flp, col = viridis::cividis(100))
 
@@ -99,7 +99,7 @@ The map and histogram below demonstrate the 10-year cumulative burn probability 
 
 > *For example, the number 0.25 would represent a 25% probability of that location (pixel) burning within the next 10 years, but does not reflect fire behavior (see above for probable flame lengths).*
 
-```{r plot_burn_probability, echo=FALSE, message=FALSE, results=FALSE, fig.show="hold", out.width="50%", cache=TRUE}
+```{r plot_burn_probability, echo=FALSE, message=FALSE, results=FALSE, fig.show="hold", out.width="50%"}
 #terra::plot(outyear_bp, col = viridis::inferno(100))
 
 max.bp = max(values(outyear_bp), na.rm=T)
@@ -134,7 +134,7 @@ bp_hist <- hist(values(outyear_bp)[!is.na(values(outyear_bp))], breaks=breaks.bp
 
 ```
 
-```{r binned burn probability of AOI, echo=FALSE, results = 'asis', cache=TRUE}
+```{r binned burn probability of AOI, echo=FALSE, results = 'asis'}
 #A single 30m pixel (on each side) = 900 Square Meters = 0.2223945 acres (1 square meter = 0.000247105 acres).
 
 rr = paste(breaks.bp[1:length(breaks.bp)-1], breaks.bp[2:length(breaks.bp)], sep= "-")
@@ -147,7 +147,7 @@ bp_area  %>%
 
 ```
 
-```{r calculate mean fire hazard, echo=FALSE, message=FALSE, cache=TRUE}
+```{r calculate mean fire hazard, echo=FALSE, message=FALSE}
 # Calculate fire hazard as the burn probability times the probabilistic flame
 # length times the response function for the hvra for each flame length, then
 # summing across those probabilistic effects per pixel to produce a single layer
@@ -162,7 +162,7 @@ fire_hazard_cropped = terra::crop(
 )
 ```
 
-```{r calculate burn probability of hvra, echo=FALSE, cache=TRUE}
+```{r calculate burn probability of hvra, echo=FALSE}
 #Crop the burn probability layer to the hvra footprint and mask to the hvra footprint too
 outyear_bp_cropped = terra::crop(
   x = outyear_bp, 
@@ -176,7 +176,7 @@ min.bp.hvra = round(min(values(outyear_bp_cropped), na.rm=T), digits=2)
 
 ```
 
-```{r calculate mean burn probability of hvra, echo=FALSE, cache=TRUE}
+```{r calculate mean burn probability of hvra, echo=FALSE}
 ## Calculate the expected mean 10-year burn probability across the hvra footprint (expressed as a proportion)
 hvra_10yr_burn_prob = exactextractr::exact_extract(
   x = outyear_bp_cropped, 
@@ -190,7 +190,7 @@ hvra_10yr_burn_prob = exactextractr::exact_extract(
 
 The map, histogram, and table below summarize the 10-year cumulative burn probability within the footprint of the `r hvra_name` HVRA of interest, which ranges from `r min.bp.hvra*100`% to `r max.bp.hvra*100`%, with a mean value of `r round(hvra_10yr_burn_prob, digits = 2)*100`%.
 
-```{r plot burn probability of hvra, echo=FALSE, message = F, fig.show="hold", out.width="50%", cache=TRUE}
+```{r plot burn probability of hvra, echo=FALSE, message = F, fig.show="hold", out.width="50%"}
 tmap_options(max.raster = c(plot = 100000, view = 100000))
 
 map_raster_bp_cropped <- tm_shape(outyear_bp_cropped, raster.downsample=T)+
@@ -219,7 +219,7 @@ bp_cropped_hist <- hist(values(outyear_bp_cropped)[!is.na(values(outyear_bp_crop
 
 ```
 
-```{r binned burn probability of hvra, echo=FALSE, results = 'asis', cache=TRUE}
+```{r binned burn probability of hvra, echo=FALSE, results = 'asis'}
 #A single 30m pixel (on each side) = 900 Square Meters = 0.2223945 acres (1 square meter = 0.000247105 acres).
 
 rr = paste(breaks.bp[1:length(breaks.bp)-1], breaks.bp[2:length(breaks.bp)], sep= "-")
@@ -243,7 +243,7 @@ Flame length categories represent:
 -   8-12 foot flame lengths
 -   Greater than 12 foot flame lengths
 
-```{r plot flame length in hvra, echo=FALSE, cache=TRUE}
+```{r plot flame length in hvra, echo=FALSE}
 #Crop the burn probability layer to the hvra footprint and mask to the hvra footprint too
 flp_cropped = terra::crop(
   x = flp, 
@@ -267,7 +267,7 @@ tm_shape(flp_cropped)+
                              "6-8 ft. Flames", "8-12 ft. Flames", ">12 ft. Flames"))
 ```
 
-```{r calculate flame lentgths of hvra, echo=FALSE, cache=TRUE}
+```{r calculate flame lentgths of hvra, echo=FALSE}
 ## Calculate the expected mean probability of different flame lengths across the hvra footprint
 hvra_flp_prob = exactextractr::exact_extract(
   x = flp_cropped, 
@@ -288,7 +288,7 @@ hvra_value_change = exactextractr::exact_extract(
 )
 ```
 
-```{r calculate conditional change in hvra value if it burns, echo=FALSE, cache=TRUE}
+```{r calculate conditional change in hvra value if it burns, echo=FALSE}
 ## Calculate the potential/conditional change in hvra value, if it burns
 ## Then calculate expected mean conditional change in hvra value across the whole landscape
 
@@ -426,13 +426,13 @@ cond_loss_area  %>%
 
 ## Summary
 
-### Across the `r params$landscape_name` landscape, we expect the `r params$hvra_name` HVRA to `r ifelse(test = hvra_value_change > 0, yes = "increase in", no = ifelse(test = hvra_value_change == 0, yes = "stay the same", no = "decrease in"))` value over the next 10 years.
+> Across the `r params$landscape_name` landscape, we expect the `r params$hvra_name` HVRA to `r ifelse(test = hvra_value_change > 0, yes = "increase in", no = ifelse(test = hvra_value_change == 0, yes = "stay the same", no = "decrease in"))` value over the next 10 years.
 
-### The 10-year average burn probability is `r round(hvra_10yr_burn_prob, digits = 3)*100`%.
+> The 10-year average burn probability is `r round(hvra_10yr_burn_prob, digits = 3)*100`%.
 
-### The potential change in value if it burns, on average, would be `r round(hvra_potential_value_change, digits = 3)*100` %.
+> The potential change in value if it burns, on average, would be `r round(hvra_potential_value_change, digits = 3)*100` %.
 
-### The response of `r params$hvra_name` to fire hazard (which factors in the 10-year burn probability, the expected flame lengths if it burns, and the expected species response to those flame lengths) under 'No-Action' will be `r round(hvra_value_change, digits = 3)*100` % change in value.
+> The response of `r params$hvra_name` to fire hazard *(which factors in the 10-year burn probability, the expected flame lengths if it burns, and the expected species response to those flame lengths)* under 'No-Action' will be `r round(hvra_value_change, digits = 3)*100` % change in value.
 
 ```{r SummaryTable, echo=FALSE, message = FALSE, warning = FALSE, results = 'asis'}
 output = cbind(c("Mean probability (%)", "RF (% change)", "Potential change (%)"), rbind(round(hvra_flp_prob, digits=2)*100, round(params$rf, digits=2)*100, round(conditional_loss_all_flips, digits=2)*100))

@@ -1,0 +1,7 @@
+disturbance_type,intensity_class,hvra_id,spatial_predictor,predictor_value,rf_value,name,objective
+Fire,1,227,GLOBAL,0,-0.02,Northern Goshawk Suitable Habitat,bdv
+Fire,2,227,GLOBAL,0,-0.044,Northern Goshawk Suitable Habitat,bdv
+Fire,3,227,GLOBAL,0,-0.151,Northern Goshawk Suitable Habitat,bdv
+Fire,4,227,GLOBAL,0,-0.184,Northern Goshawk Suitable Habitat,bdv
+Fire,5,227,GLOBAL,0,-0.412,Northern Goshawk Suitable Habitat,bdv
+Fire,6,227,GLOBAL,0,-0.676,Northern Goshawk Suitable Habitat,bdv
