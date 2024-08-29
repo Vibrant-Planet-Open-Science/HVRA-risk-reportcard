@@ -1,9 +1,9 @@
 # Valued resource exposure to fire hazard report 
 
-This open repository contains code to quantify the wildfire risk exposure of valued resources. Wildfire risk to valued resources is quantified as the susceptibility of a valued resource (represented by a "response function" describing the normalzied change in resource value when exposed to one of six fire intensity classes) to fire hazard (the product of burn probability and fire intensity). This framework follows GTR-315: A Wildfire Risk Assessment Framework
-for Land and Resource Management [https://www.fs.usda.gov/rm/pubs/rmrs_gtr315.pdf], and modifications developed by Vibrant Planet [PRODUCT GUIDE URL] 
+This open repository contains code to quantify the wildfire risk exposure of valued resources. Wildfire risk to valued resources is quantified as the susceptibility of a valued resource (represented by a "response function" describing the normalzied change in resource value when exposed to one of six fire intensity classes) to fire hazard (the product of burn probability and fire intensity). This framework follows [GTR-315: A Wildfire Risk Assessment Framework
+for Land and Resource Management](https://www.fs.usda.gov/rm/pubs/rmrs_gtr315.pdf), and modifications developed by [Vibrant Planet](https://www.vibrantplanet.net/science) 
 
-![Components of fire risk](https://drive.google.com/file/d/1YYSM_wYOntjX6PxAt2S3ipNgJ8X0jV_B/view?usp=sharing)
+![Components of fire risk](https://drive.google.com/uc?export=view&id=1YYSM_wYOntjX6PxAt2S3ipNgJ8X0jV_B)
 
 
 ## There are two components to this repository: 
