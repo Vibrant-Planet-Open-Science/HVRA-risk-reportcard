@@ -27,6 +27,7 @@ This repository is a worked example for a single resource (Northern Goshawk) and
 | 5               | -0.254  | 
 | 6               | -0.503  | 
 +-----------------+---------+
+
 This repository was developed by scientists at Vibrant Planet and Pyrologix: Sophie Gilbert, Michael Koontz, [Katharyn Duffy](https://orcid.org/0000-0001-6108-7718), Joe Shannon, and Tyler Hoecker.
 
 
