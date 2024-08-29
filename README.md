@@ -17,16 +17,16 @@ The codebase executes the following steps:
 
 This repository is a worked example for a single resource (Northern Goshawk) and WCS landscape (Central Washington Initiative). Replace the `demo-data` with a geospatial file representing your area of interest, a geospatial file representing the extent of the valued resource of interest, and a CSV file representing the resource's respons to six fire intensity classes. The RF CSV must exactly follow this minimal format:
 
-+-----------------+---------+
+
 | intensity_class | rf_value| 
-+=================+=========+
+|-----------------|---------|
 | 1               | -0.221  | 
 | 2               | -0.221  | 
 | 3               | -0.224  | 
 | 4               | -0.225  | 
 | 5               | -0.254  | 
 | 6               | -0.503  | 
-+-----------------+---------+
+
 
 This repository was developed by scientists at Vibrant Planet and Pyrologix: Sophie Gilbert, Michael Koontz, [Katharyn Duffy](https://orcid.org/0000-0001-6108-7718), Joe Shannon, and Tyler Hoecker.
 
