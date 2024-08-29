@@ -10,13 +10,23 @@ for Land and Resource Management](https://www.fs.usda.gov/rm/pubs/rmrs_gtr315.pd
 - `demo-code` contains an R script that renders an RMarkdown notebook reporting risk to the resource. 
 - `demo-data` contains geospatial files representing an AOI and the extent of a valued resource, and a CSV representing the resource's response function (RF).
 
-This repository is a worked example for a single resource (Northern Goshawk) and WCS landscape (Central Washington Initiative). Replace the `demo-data` with a geospatial file representing your area of interest, a geospatial file representing the extent of the valued resource of interest, and a CSV file representing the resource's respons to six fire intensity classes. The RF CSV must exactly follow the example format. 
-
 The codebase executes the following steps:
 - Import existing valued resource response functions via a CSV file
 - Expose those response functions to predicted flame length rasters by fire intensity class
 - Estimate the cumulative change in resource value based on a 10-year cumulative burn probability
 
+This repository is a worked example for a single resource (Northern Goshawk) and WCS landscape (Central Washington Initiative). Replace the `demo-data` with a geospatial file representing your area of interest, a geospatial file representing the extent of the valued resource of interest, and a CSV file representing the resource's respons to six fire intensity classes. The RF CSV must exactly follow this minimal format:
+
++-----------------+---------+
+| intensity_class | rf_value| 
++=================+=========+
+| 1               | -0.221  | 
+| 2               | -0.221  | 
+| 3               | -0.224  | 
+| 4               | -0.225  | 
+| 5               | -0.254  | 
+| 6               | -0.503  | 
++-----------------+---------+
 This repository was developed by scientists at Vibrant Planet and Pyrologix: Sophie Gilbert, Michael Koontz, [Katharyn Duffy](https://orcid.org/0000-0001-6108-7718), Joe Shannon, and Tyler Hoecker.
 
 
